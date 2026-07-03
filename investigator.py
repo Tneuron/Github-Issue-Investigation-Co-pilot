@@ -70,11 +70,6 @@ class Investigator:
             response = response.content
         if not isinstance(response, str):
             response = str(response)
-        print("=" * 80)
-        print("RAW LLM RESPONSE")
-        print("=" * 80)
-        print(repr(response))
-        print("=" * 80)
         data = self._parse_json(response)
         if "requested_symbols" in data and "additional_context_required" not in data:
             data["additional_context_required"] = [
