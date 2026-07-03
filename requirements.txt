@@ -1,0 +1,16 @@
+```text
+faiss-cpu
+numpy
+sentence-transformers
+transformers
+torch
+ollama
+pydantic
+python-dotenv
+tqdm
+
+# Planned MCP / GitHub integration
+mcp
+httpx
+PyGithub
+```
