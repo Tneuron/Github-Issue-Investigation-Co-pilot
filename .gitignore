@@ -12,7 +12,7 @@ env/
 vector_store/
 
 # Cloned external repository
-flash-attention/
+repositories/
 
 # Local experiments / scratch folders
 giisinco/
