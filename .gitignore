@@ -6,6 +6,7 @@ __pycache__/
 .venv/
 venv/
 env/
+.env
 
 # Generated vector index / local data
 vector_store/

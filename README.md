@@ -1,132 +1,181 @@
 # GitHub Issue Investigation Copilot
 
-An evidence-grounded copilot for investigating GitHub issues against a repository’s source code.
+An evidence-grounded AI agent that investigates GitHub issues against a repository’s source code.
 
-Instead of treating an issue as a prompt and generating a speculative answer, this project retrieves relevant repository symbols, extracts static semantic relationships, validates evidence references, and produces a report that distinguishes between:
+Given a GitHub repository and issue number, it:
 
-* **verified repository findings**
-* **unverified issue claims**
-* **missing evidence required for a stronger conclusion**
+1. Fetches the issue through GitHub MCP
+2. Clones the repository at a pinned commit
+3. Parses and chunks the codebase
+4. Builds a FAISS vector index
+5. Retrieves code using the issue title
+6. Expands relevant symbols through a code graph
+7. Produces a report using verified repository facts
 
-The system is designed to be conservative: if the repository context cannot prove a root cause, it reports insufficient evidence rather than inventing one.
+## What it can verify
 
----
+This project currently works best for **static code issues**, such as:
 
-## Why this project?
+* incorrect assignments
+* `None` propagation
+* wrong return-value usage
+* missing condition handling
+* incorrect function calls
+* data-flow bugs between functions
 
-GitHub issues often contain suspected causes, stack traces, proposed fixes, and environment details. Those claims may be correct, but they are not proof.
+It does not yet fully investigate runtime-only, CI, dependency, environment, distributed-system, or historical regression issues because those require external evidence such as logs, test runs, package metadata, CI output, or Git history.
 
-This project investigates an issue using repository evidence:
-
-```text
-GitHub issue
-    ↓
-Hybrid retrieval over repository symbols
-    ↓
-Graph-based context expansion
-    ↓
-Static semantic and data-flow fact extraction
-    ↓
-Evidence validation
-    ↓
-Deterministic findings + grounded report
-```
-
-The result is not just “an LLM opinion.” It is a report tied to extracted repository facts.
-
----
-
-## Current Capabilities
-
-### 1. Hybrid code retrieval
-
-The issue title is used to retrieve relevant repository symbols through a hybrid retrieval layer. The retriever identifies likely functions, methods, classes, and files involved in the issue.
-
-### 2. Repository graph construction
-
-The project builds a graph over indexed code symbols and their relationships. This allows the investigation pipeline to expand from directly retrieved symbols into nearby callers, callees, helpers, and related implementation context.
-
-### 3. Static semantic fact extraction
-
-The evidence layer extracts facts such as:
+## Architecture
 
 ```text
-Data Flow:
-source → target
-
-Conditional Return:
-when condition, function.Return[index] = value
-
-Argument Flow:
-variable → called_function.Argument[index]
-
-Keyword Flow:
-variable → called_function.keyword_argument
+User input: owner/repo + issue number
+        ↓
+GitHub MCP Server
+        ↓
+Issue title + body
+        ↓
+Git clone at commit SHA
+        ↓
+FileParser → StructuralChunker → CodeEmbedder → FAISS
+        ↓
+HybridRetriever (issue title only)
+        ↓
+Graph expansion + verified semantic facts
+        ↓
+LLM Investigator
+        ↓
+Evidence-grounded investigation report
 ```
 
-These facts are treated as verified repository evidence.
+The issue title is used for retrieval. The issue body is used as investigation context, not as verified repository evidence.
 
-### 4. Evidence-grounded investigation
-
-The investigator validates every evidence reference returned by the LLM. A report cannot cite symbols or fact IDs that are not present in the supplied repository context.
-
-### 5. Deterministic verified findings
-
-For supported static patterns, the project creates findings deterministically instead of allowing the LLM to freely rewrite critical technical details.
-
-Current supported pattern:
+## Project structure
 
 ```text
-conditional helper return
-    ↓
-returned value propagates into caller local variable
-    ↓
-verified local overwrite finding
+app.py                 # Main entry point
+github_mcp_client.py   # MCP client for GitHub issue data
+repo_manager.py        # Clones and checks out repositories
+
+file_parser.py         # Reads repository files
+chunker.py             # Creates structural code chunks
+embedder.py            # Generates embeddings
+indexer.py             # Saves/loads FAISS index
+retriever.py           # Retrieves relevant code chunks
+graph_builder.py       # Builds symbol/data-flow graph
+context_builder.py     # Expands investigation context
+investigator.py        # Produces verified issue report
+llm.py                 # Ollama model wrapper
 ```
 
-For example:
+## Requirements
+
+* Python 3.10+
+* Docker
+* Git
+* Ollama
+* GitHub personal access token
+
+Install Python dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Pull the model:
+
+```bash
+ollama pull qwen2.5-coder:7b
+```
+
+## Docker setup
+
+Docker runs the GitHub MCP server. Your Python app starts the MCP server as a temporary container and communicates with it through stdin/stdout.
+
+Install Docker on Ubuntu:
+
+```bash
+sudo apt update
+sudo apt install docker.io
+```
+
+Start Docker:
+
+```bash
+sudo systemctl enable --now docker
+```
+
+Allow your user to run Docker without `sudo`:
+
+```bash
+sudo usermod -aG docker $USER
+newgrp docker
+```
+
+Verify Docker:
+
+```bash
+docker --version
+docker run hello-world
+```
+
+Do not run the Python project using `sudo`.
+
+## GitHub token setup
+
+Create a GitHub personal access token and add it to a `.env` file in the project root:
+
+```env
+GITHUB_TOKEN=your_token_here
+```
+
+For a classic token, use:
 
 ```text
-Conditional Return:
-when const_expr(score_mod is None),
-compute_softmax_scale_log2.Return[1] = None
-
-Propagation:
-None → compute_softmax_scale_log2.Return[1] → softmax_scale
+repo
+read:org
 ```
 
-This allows the system to verify that `softmax_scale` is overwritten with `None`, while still stating that a later runtime error is not independently verified unless the full downstream path is present.
+Add this to `.gitignore`:
 
-### 6. Evidence-completeness confidence
+```gitignore
+.env
+repositories/
+vector_store/
+data/
+```
 
-Confidence is based on the completeness of verified evidence, not on an LLM-generated guess.
+## Run
 
-A finding with a verified local overwrite but no verified downstream runtime path receives lower confidence than one where the full causal chain is available.
+```bash
+python3 app.py
+```
 
----
+Then enter:
 
-## Example Investigation Output
+```text
+Enter GitHub repository (owner/repo): Dao-AILab/flash-attention
+Enter GitHub issue number: 2566
+```
+
+The application will:
+
+```text
+fetch issue → clone repo → ingest code → build index → investigate issue
+```
+
+## Example report output
 
 ```text
 Evidence Found : True
 Confidence     : 0.88
 
 Summary
-Repository evidence supports the reported overwrite. When
-const_expr(score_mod is None), compute_softmax_scale_log2 returns None in
-return slot 1, and FlashAttentionBackwardSm80.__call__ assigns that result
-to local softmax_scale.
+Repository evidence supports the reported overwrite.
 
 Root Cause
 FlashAttentionBackwardSm80.__call__ assigns
-compute_softmax_scale_log2.Return[1] to softmax_scale. Under
-const_expr(score_mod is None), that return value is None, so local
-softmax_scale is overwritten with None.
-
-Reasoning
-The conditional return and propagation facts verify the overwrite. The
-supplied context does not independently verify the later kernel argument path
-or the exact reported runtime error.
+compute_softmax_scale_log2.Return[1] to softmax_scale.
+Under const_expr(score_mod is None), that value is None.
 
 Evidence
 • compute_softmax_scale_log2
@@ -134,259 +183,29 @@ Evidence
   compute_softmax_scale_log2.Return[1] = None
 
 • FlashAttentionBackwardSm80.__call__
-  Propagation: None → compute_softmax_scale_log2.Return[1] → softmax_scale
+  Propagation: None -> compute_softmax_scale_log2.Return[1] -> softmax_scale
 ```
 
----
+## Current limitations
 
-## What It Works Best For
+The agent does not yet collect:
 
-The current version is strongest for issues whose cause can be verified from static source-code relationships inside the indexed repository:
+* GitHub Actions logs
+* runtime traces
+* dependency/version conflicts
+* environment details
+* commit history and regression diffs
+* distributed-system traces
 
-* incorrect return-value propagation
-* `None` or null overwrites
-* incorrect tuple unpacking
-* wrong argument propagation
-* local state mutation mistakes
-* missing branch handling visible in source
-* direct caller/callee API misuse
-* defects where both the cause and effect path exist in the repository
+These are planned future extensions through additional MCP tools and evidence collectors.
 
----
+## Future work
 
-## Current Limitations
-
-The project does not claim to solve every GitHub issue from source code alone.
-
-It may provide only partial findings or insufficient-evidence reports for issues involving:
-
-* environment variables and runtime configuration
-* GPU, driver, CUDA, or hardware-specific behavior
-* filesystem caches and cross-process behavior
-* race conditions and distributed systems
-* external dependency internals
-* build, linker, ABI, packaging, or CI-only failures
-* performance regressions requiring benchmark data
-* historical regressions requiring commit comparison
-* bugs requiring logs, reproduction inputs, or runtime traces
-
-For these cases, the correct output is not a hallucinated root cause. The system should identify relevant repository entry points and explain what additional evidence is required.
-
----
-
-## Architecture
-
-```text
-┌─────────────────────┐
-│ GitHub Issue Input  │
-│ title + body        │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Hybrid Retriever    │
-│ FAISS + symbol data │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Repository Graph    │
-│ context expansion   │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Context Planner     │
-│ selects symbols     │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Evidence Builder    │
-│ semantic facts      │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Investigator        │
-│ validates evidence  │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Finding Engine      │
-│ deterministic rules │
-└──────────┬──────────┘
-           │
-           ▼
-┌─────────────────────┐
-│ Investigation Report│
-└─────────────────────┘
-```
-
----
-
-## Project Structure
-
-```text
-.
-├── chunker.py              # Extracts repository code chunks and symbols
-├── indexer.py              # Builds and loads FAISS vector indexes
-├── retriever.py            # Hybrid retrieval over repository chunks
-├── graph_builder.py        # Builds graph relationships between symbols
-├── context_builder.py      # Context expansion, planning, and prompt creation
-├── evidence_builder.py     # Extracts static semantic and data-flow facts
-├── investigator.py         # Validates evidence and builds investigation results
-├── llm.py                  # Ollama LLM wrapper
-├── test.py                 # Local investigation runner
-├── data/
-│   └── chunks.pkl
-└── vector_store/
-    └── code.index
-```
-
----
-
-## Installation
-
-### 1. Clone the repository
-
-```bash
-git clone <your-repository-url>
-cd <your-project-directory>
-```
-
-### 2. Create and activate a virtual environment
-
-```bash
-python3 -m venv giisinco
-source giisinco/bin/activate
-```
-
-On Windows:
-
-```bash
-giisinco\Scripts\activate
-```
-
-### 3. Install dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Install and start Ollama
-
-Install [Ollama](https://ollama.com?utm_source=chatgpt.com), then pull the model used by the project:
-
-```bash
-ollama pull qwen2.5-coder:7b
-```
-
-Start the Ollama server if it is not already running:
-
-```bash
-ollama serve
-```
-
----
-
-## Running an Investigation
-
-Update the issue title and body in `test.py`, then run:
-
-```bash
-python3 test.py
-```
-
-The runner prints:
-
-1. retrieved symbols
-2. planner-selected symbols
-3. expanded investigation context
-4. prompt size
-5. raw LLM output
-6. final validated investigation report
-
----
-
-## Planned MCP Integration
-
-The next major milestone is Model Context Protocol integration.
-
-Instead of manually entering issue text and indexing a repository locally, the system will accept:
-
-```text
-repository: owner/repository
-issue number: 123
-```
-
-MCP tools will retrieve:
-
-* issue title and body
-* labels and comments
-* linked pull requests
-* repository metadata
-* default branch
-* commit SHA used for analysis
-* repository tree
-* relevant source files on demand
-
-Planned flow:
-
-```text
-User enters repository + issue number
-    ↓
-MCP GitHub tools fetch issue and repository metadata
-    ↓
-Repository is pinned to a commit SHA
-    ↓
-Code is indexed and investigated
-    ↓
-Evidence-grounded report is returned
-```
-
-Pinning the investigation to a commit SHA is important because issue discussions may refer to code that differs from the latest branch.
-
----
-
-## Future Work
-
-* MCP-based GitHub issue and repository ingestion
-* commit-SHA-pinned investigations
-* Git history support for regression analysis
-* dependency-aware investigation boundaries
-* runtime log and stack-trace ingestion
-* CI failure analysis
-* benchmark-aware performance investigation
-* broader deterministic finding patterns
-* evaluation dataset across repositories and issue categories
-* web interface and API deployment
-
----
-
-## Design Principles
-
-* **Evidence before explanation**
-  A root cause should be supported by repository facts.
-
-* **No fabricated citations**
-  The LLM cannot cite symbols or facts that are absent from the supplied context.
-
-* **Deterministic handling for critical findings**
-  Conditions, variable names, return slots, and confidence should not be altered by free-form generation.
-
-* **Useful uncertainty**
-  “Insufficient evidence” is a valid and useful result when source code alone cannot verify a runtime or dependency-level claim.
-
-* **Reproducibility**
-  Future MCP-based investigations will pin reports to a repository commit SHA.
-
----
-
-## Requirements
-
-See `requirements.txt` for the Python dependencies.
-
----
+* Fetch issue comments
+* Fetch linked pull requests
+* Fetch CI logs
+* Support repository-specific FAISS indexes
+* Add Git history and regression analysis
+* Add runtime/log evidence parsing
+* Add a web interface
 

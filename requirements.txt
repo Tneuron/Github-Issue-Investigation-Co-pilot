@@ -1,4 +1,3 @@
-```text
 faiss-cpu
 numpy
 sentence-transformers
@@ -8,9 +7,5 @@ ollama
 pydantic
 python-dotenv
 tqdm
-
-# Planned MCP / GitHub integration
 mcp
-httpx
-PyGithub
-```
+
