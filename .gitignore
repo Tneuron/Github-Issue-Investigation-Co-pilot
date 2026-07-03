@@ -1,0 +1,24 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Local virtual environments
+.venv/
+venv/
+env/
+
+# Generated vector index / local data
+vector_store/
+
+# Cloned external repository
+flash-attention/
+
+# Local experiments / scratch folders
+giisinco/
+
+# Environment secrets
+.env
+
+# IDE files
+.vscode/
+.idea/
