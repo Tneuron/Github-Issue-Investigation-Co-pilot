@@ -163,26 +163,60 @@ The application will:
 fetch issue → clone repo → ingest code → build index → investigate issue
 ```
 
-## Example report output
+## Example github issue and report output
 
 ```text
+================================================================================
+GITHUB ISSUE
+================================================================================
+Repository : Dao-AILab/flash-attention
+Issue      : #2651
+Title      : FlashAttentionBackwardSm80: compute_softmax_scale_log2 overwrites softmax_scale with None → DSLRuntimeError
+```
+
+```text
+================================================================================
+FINAL INVESTIGATION REPORT
+================================================================================
 Evidence Found : True
-Confidence     : 0.88
+Confidence     : 0.90
 
 Summary
-Repository evidence supports the reported overwrite.
+--------------------------------------------------------------------------------
+Repository evidence supports the reported overwrite. When const_expr(score_mod is None), compute_softmax_scale_log2 returns None as its second result, and FlashAttentionBackwardSm80.__call__ assigns that result to local softmax_scale.
 
 Root Cause
-FlashAttentionBackwardSm80.__call__ assigns
-compute_softmax_scale_log2.Return[1] to softmax_scale.
-Under const_expr(score_mod is None), that value is None.
+--------------------------------------------------------------------------------
+FlashAttentionBackwardSm80.__call__ assigns compute_softmax_scale_log2.Return[1] to softmax_scale. Under const_expr(score_mod is None), that return value is None, so local softmax_scale is overwritten with None.
+
+Reasoning
+--------------------------------------------------------------------------------
+The conditional return and propagation facts verify the overwrite. The supplied context does not independently verify the later kernel argument path or the exact reported DSLRuntimeError.
+
+Relevant Files
+--------------------------------------------------------------------------------
+• flash_attn/cute/flash_fwd_sm90.py
+• flash_attn/cute/utils.py
+
+Relevant Functions
+--------------------------------------------------------------------------------
+• FlashAttentionForwardSm90.__call__
+• compute_softmax_scale_log2
+
+Execution Flow
+--------------------------------------------------------------------------------
+1. compute_softmax_scale_log2
+   Under const_expr(score_mod is None), compute_softmax_scale_log2.Return[1] is None.
+   ↓
+2. FlashAttentionForwardSm90.__call__
+   The caller assigns compute_softmax_scale_log2.Return[1] to softmax_scale.
 
 Evidence
+--------------------------------------------------------------------------------
 • compute_softmax_scale_log2
-  Conditional Return: when const_expr(score_mod is None),
-  compute_softmax_scale_log2.Return[1] = None
+  Conditional Return: when const_expr(score_mod is None), compute_softmax_scale_log2.Return[1] = None
 
-• FlashAttentionBackwardSm80.__call__
+• FlashAttentionForwardSm90.__call__
   Propagation: None -> compute_softmax_scale_log2.Return[1] -> softmax_scale
 ```
 
