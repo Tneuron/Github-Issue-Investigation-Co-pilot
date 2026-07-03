@@ -390,6 +390,3 @@ See `requirements.txt` for the Python dependencies.
 
 ---
 
-## License
-
-Add a license appropriate for your intended use, such as MIT.
