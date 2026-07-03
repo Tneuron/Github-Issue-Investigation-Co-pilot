@@ -79,10 +79,6 @@ class HybridRetriever:
         return results
 
     def rerank(self, query: str, results: list[dict]):
-        """
-        Apply generic lexical and chunk-type boosts after combining exact and
-        semantic retrieval.
-        """
         query_tokens = self.tokenize(query)
 
         for result in results:

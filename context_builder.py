@@ -195,97 +195,46 @@ class ContextBuilder:
     def __init__(self, graph):
         self.graph = graph
     def expand(self, start_ids, depth=None):
-        """
-        Return a small, deterministic neighbourhood around selected symbols.
-
-        Priority:
-        1. Starting symbols
-        2. Direct callees
-        3. Direct callers
-
-        We intentionally avoid ranking by graph degree because large kernel/helper
-        methods tend to dominate that ranking even when they are irrelevant.
-        """
-
         if depth is None:
             depth = 1
-
         MAX_CONTEXT_NODES = 8
-
         visited = set()
         context = []
-
         def add_node(node_id):
             if node_id in visited:
                 return False
-
             if len(context) >= MAX_CONTEXT_NODES:
                 return False
-
             node = self.graph.get(node_id)
             if node is None:
                 return False
-
             visited.add(node_id)
             context.append(node)
             return True
-
-        # ------------------------------------------------------------
-        # 1. Always keep the requested starting symbols first.
-        # ------------------------------------------------------------
         for node_id in start_ids:
             add_node(node_id)
-
         if depth == 0:
             return context
-
-        # ------------------------------------------------------------
-        # 2. Add direct callees first.
-        #
-        # For this issue:
-        # FlashAttentionBackwardSm80.__call__
-        #     -> compute_softmax_scale_log2
-        # ------------------------------------------------------------
         for node_id in start_ids:
             node = self.graph.get(node_id)
-
             if node is None:
                 continue
-
             for callee_id in node.calls:
                 add_node(callee_id)
-
-        # ------------------------------------------------------------
-        # 3. Then add direct callers.
-        #
-        # This helps when retrieval starts from a helper function and we
-        # need to see where its return value is consumed.
-        # ------------------------------------------------------------
         for node_id in start_ids:
             node = self.graph.get(node_id)
-
             if node is None:
                 continue
-
             for caller_id in node.called_by:
                 add_node(caller_id)
-
-        # ------------------------------------------------------------
-        # 4. Only for depth >= 2, inspect one more hop.
-        # Do not use this in test.py yet.
-        # ------------------------------------------------------------
         if depth >= 2:
             first_hop_ids = [node.chunk.id for node in context]
-
             for node_id in first_hop_ids:
                 node = self.graph.get(node_id)
-
                 if node is None:
                     continue
-
                 for neighbour_id in list(node.calls) + list(node.called_by):
                     add_node(neighbour_id)
-
         return context
 
 
@@ -389,11 +338,6 @@ class PromptBuilder:
         prompt.append("=" * 80)
 
         prompt.append(TASK_PROMPT)
-
-        # ==========================================================
-        # ISSUE
-        # ==========================================================
-
         prompt.append("")
         prompt.append("=" * 80)
         prompt.append("GITHUB ISSUE")
@@ -419,11 +363,6 @@ class PromptBuilder:
             "Use repository evidence to support, contradict, or mark issue claims "
             "as insufficiently verified."
         )
-
-        # ==========================================================
-        # SYMBOLS
-        # ==========================================================
-
         prompt.append("")
         prompt.append("=" * 80)
         prompt.append("REPOSITORY SYMBOLS")
@@ -484,9 +423,6 @@ class PromptBuilder:
             )
             prompt.append("```")
             lines = item.code.splitlines()
-
-            # Raw code is context only. Keep it very small so the model focuses on
-            # verified facts rather than trying to re-analyse a large code dump.
             MAX_CODE_LINES_PER_SYMBOL = 8
 
             if len(lines) <= MAX_CODE_LINES_PER_SYMBOL:

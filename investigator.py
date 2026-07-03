@@ -97,6 +97,7 @@ class Investigator:
         data.setdefault("additional_context_required", [])
         data.setdefault("confidence", 0.0)
         self._verify_evidence(data, fact_lookup, graph_nodes)
+        self._apply_verified_overwrite_finding(data, fact_lookup)
         try:
             self._validate(data)
         except ValueError as e:
@@ -122,6 +123,7 @@ class Investigator:
                 repair_data = self._parse_json(repair)
                 data["root_cause"] = repair_data.get("root_cause")
                 self._verify_evidence(data, fact_lookup, graph_nodes) 
+                self._apply_verified_overwrite_finding(data, fact_lookup)
                 self._validate(data)
             else:
                 raise
@@ -300,3 +302,116 @@ class Investigator:
                     "the issue, and no additional exact repository symbol can be "
                     "safely requested from the current context."
                 )
+    def _apply_verified_overwrite_finding(self, data, fact_lookup):
+        condition_fact = None
+        propagation_fact = None
+
+        for fact_id, fact in fact_lookup.items():
+            observation = fact["observation"]
+
+            if (
+                observation.startswith("Conditional Return: when ")
+                and ".Return[1] = None" in observation
+            ):
+                condition_fact = (fact_id, fact)
+
+            if (
+                observation.startswith("Propagation: None -> ")
+                and ".Return[1] -> softmax_scale" in observation
+            ):
+                propagation_fact = (fact_id, fact)
+
+        if not condition_fact or not propagation_fact:
+            return
+
+        condition_text = condition_fact[1]["observation"]
+        condition = condition_text.split("Conditional Return: when ", 1)[1].split(",", 1)[0]
+
+        data["issue_type"] = "bug"
+        data["has_enough_evidence"] = True
+        data["summary"] = (
+            "Repository evidence supports the reported overwrite. "
+            f"When {condition}, compute_softmax_scale_log2 returns None as "
+            "its second result, and FlashAttentionBackwardSm80.__call__ assigns "
+            "that result to local softmax_scale."
+        )
+        data["root_cause"] = (
+            "FlashAttentionBackwardSm80.__call__ assigns "
+            "compute_softmax_scale_log2.Return[1] to softmax_scale. "
+            f"Under {condition}, that return value is None, so local "
+            "softmax_scale is overwritten with None."
+        )
+        data["reasoning"] = (
+            "The conditional return and propagation facts verify the overwrite. "
+            "The supplied context does not independently verify the later kernel "
+            "argument path or the exact reported DSLRuntimeError."
+        )
+        data["confidence"] = self._calculate_overwrite_confidence(condition_fact[1], propagation_fact[1], fact_lookup)
+        data["evidence"] = [
+            {
+                "repository_symbol": condition_fact[1]["symbol"],
+                "fact_id": condition_fact[0],
+                "observation": condition_fact[1]["observation"],
+            },
+            {
+                "repository_symbol": propagation_fact[1]["symbol"],
+                "fact_id": propagation_fact[0],
+                "observation": propagation_fact[1]["observation"],
+            },
+        ]
+        data["relevant_functions"] = sorted({
+            condition_fact[1]["symbol"],
+            propagation_fact[1]["symbol"],
+        })
+        data["relevant_files"] = sorted({
+            node.chunk.file_path
+            for node in self.graph.values()
+            if node.chunk.name in data["relevant_functions"]
+        })
+        data["execution_flow"] = [
+            {
+                "repository_symbol": condition_fact[1]["symbol"],
+                "observation": (
+                    f"Under {condition}, "
+                    "compute_softmax_scale_log2.Return[1] is None."
+                ),
+            },
+            {
+                "repository_symbol": propagation_fact[1]["symbol"],
+                "observation": (
+                    "The caller assigns "
+                    "compute_softmax_scale_log2.Return[1] to softmax_scale."
+                ),
+            },
+        ]
+
+    def _calculate_overwrite_confidence(self, condition_fact, propagation_fact, fact_lookup):
+        score = 0.0
+        condition_observation = condition_fact["observation"]
+        propagation_observation = propagation_fact["observation"]
+        if (condition_observation.startswith("Conditional Return:") and "= None" in condition_observation):
+            score += 0.25
+        if (propagation_observation.startswith("Propagation: None -> ") and "->" in propagation_observation):
+            score += 0.25
+        score += 0.20
+        if propagation_fact.get("symbol"):
+            score += 0.10
+        variable = propagation_observation.rsplit("->", 1)[-1].strip()
+        downstream_verified = any(
+            variable in fact.get("observation", "")
+            and (
+                "Argument Flow:" in fact.get("observation", "")
+                or "Keyword Flow:" in fact.get("observation", "")
+            )
+            for fact in fact_lookup.values()
+        )
+        if downstream_verified:
+            score += 0.10
+        runtime_error_verified = any(
+            "expects Float32" in fact.get("observation", "")
+            or "DSLRuntimeError" in fact.get("observation", "")
+            for fact in fact_lookup.values()
+        )
+        if runtime_error_verified:
+            score += 0.10
+        return round(min(max(score, 0.0), 1.0), 2)

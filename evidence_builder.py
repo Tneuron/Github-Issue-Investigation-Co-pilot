@@ -369,43 +369,26 @@ class EvidenceBuilder:
 
         for item in evidence:
             for relation in item.semantics:
-                # Example:
-                # Conditional Return: when score_mod is None,
-                # compute_softmax_scale_log2.Return[1] = None
-                if (
-                    relation.startswith("Conditional Return:")
-                    and ".Return[" in relation
-                    and relation.endswith("= None")
-                ):
+                if (relation.startswith("Conditional Return:") and ".Return[" in relation and relation.endswith("= None")):
                     match = re.search(
                         r"when (.*?),\s*([A-Za-z_][\w.]*)\.Return\[(\d+)\] = None$",
                         relation,
                     )
-
                     if match:
                         condition = match.group(1).strip()
                         function_name = match.group(2).strip()
                         return_index = int(match.group(3))
-
-                        conditional_none_returns.add(
-                            (condition, function_name, return_index)
-                        )
-
-                # Example:
-                # Data Flow: compute_softmax_scale_log2.Return[1] -> softmax_scale
+                        conditional_none_returns.add((condition, function_name, return_index))
                 elif relation.startswith("Data Flow:") and ".Return[" in relation:
                     match = re.search(
                         r"Data Flow:\s*([A-Za-z_][\w.]*)\.Return\[(\d+)\]\s*->\s*([A-Za-z_]\w*)$",
                         relation,
                     )
-
                     if match:
                         function_name = match.group(1).strip()
                         return_index = int(match.group(2))
                         target_variable = match.group(3).strip()
-
-                        tuple_assignments.append(
-                            (
+                        tuple_assignments.append((
                                 item.symbol,
                                 function_name,
                                 return_index,
@@ -437,7 +420,6 @@ class EvidenceBuilder:
                         f"Therefore {caller_symbol} overwrites local "
                         f"{target_variable} with None."
                     )
-
         return defect_facts
 
     def _build_propagation_facts(self, semantics):

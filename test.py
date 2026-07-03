@@ -163,11 +163,6 @@ print("\nExpanded Investigation Context\n")
 for node in expanded:
     print("-", node.chunk.file_path, node.chunk.name)
 
-
-# ============================================================
-# FIRST INVESTIGATION PASS
-# ============================================================
-
 prompt = prompt_builder.build(issue, expanded)
 
 print("=" * 80)
@@ -176,16 +171,6 @@ print("=" * 80)
 print(len(prompt), "characters")
 print(prompt.count("\n"), "lines")
 print()
-
-
-# ============================================================
-# CONTROLLED FOLLOW-UP INVESTIGATION
-#
-# The LLM is allowed to ask for more context, but:
-# - only exact symbol matches are added
-# - only function/method nodes are added
-# - context never grows beyond MAX_INVESTIGATION_NODES
-# ============================================================
 
 MAX_ROUNDS = 3
 current_context = list(expanded)
@@ -290,14 +275,20 @@ else:
 
 print("\nEvidence")
 print("-" * 80)
-
 if result.evidence:
     for item in result.evidence:
-        symbol = (item.get("symbol")or item.get("repository_symbol"))
-        observation = (item.get("observation") or item.get("fact_id")
+        symbol = (
+            item.get("repository_symbol")
+            or item.get("symbol")
+            or "Unknown symbol"
         )
+        observation = item.get("observation")
+        fact_id = item.get("fact_id")
         print(f"• {symbol}")
-        print(f"  {observation}")
+        if observation:
+            print(f"  {observation}")
+        elif fact_id:
+            print(f"  Fact ID: {fact_id}")
         print()
 else:
     print("No verified evidence.")
