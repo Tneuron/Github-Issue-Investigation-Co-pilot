@@ -96,6 +96,7 @@ for result in results:
     if node_id is not None:
         start_ids.append(node_id)
 
+print()
 print("=" * 80)
 print("RETRIEVER")
 print("=" * 80)
@@ -164,13 +165,6 @@ for node in expanded:
     print("-", node.chunk.file_path, node.chunk.name)
 
 prompt = prompt_builder.build(issue, expanded)
-
-print("=" * 80)
-print("PROMPT SIZE")
-print("=" * 80)
-print(len(prompt), "characters")
-print(prompt.count("\n"), "lines")
-print()
 
 MAX_ROUNDS = 3
 current_context = list(expanded)
